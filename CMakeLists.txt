@@ -245,11 +245,13 @@ if(ENABLE_VOICE)
         src/Core/AV/AudioPipeline.cpp
         src/Core/AV/IAudioBackend.cpp
         src/Core/AV/MiniaudioAudioBackend.cpp
+        src/Core/AV/AudioBackends.cpp
         src/Core/AV/OpusEncoder.cpp
         src/Core/AV/OpusDecoder.cpp
         src/Core/AV/JitterBuffer.cpp
         src/Core/AV/AudioMixer.cpp
         src/Core/AV/NoiseSuppressor.cpp
+        src/UI/Settings/AudioPage.cpp
     )
 endif()
 
@@ -325,6 +327,7 @@ if(ENABLE_VOICE)
     )
 
     target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/miniaudio")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_MINIAUDIO)
     if(ENABLE_RNNOISE)
         target_link_libraries(${PROJECT_NAME} PRIVATE rnnoise)
         target_compile_definitions(${PROJECT_NAME} PRIVATE ACHERON_HAVE_RNNOISE)

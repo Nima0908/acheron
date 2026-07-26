@@ -3,6 +3,10 @@
 #include "AppearancePage.hpp"
 #include "GeneralPage.hpp"
 
+#ifdef ACHERON_HAVE_MINIAUDIO
+#  include "AudioPage.hpp"
+#endif
+
 namespace Acheron {
 namespace UI {
 
@@ -34,6 +38,10 @@ void SettingsWindow::setupUi()
     auto *appearance = new AppearancePage(this);
     addPage(tr("Appearance"), appearance);
     connect(appearance, &AppearancePage::channelListModeChanged, this, &SettingsWindow::channelListModeChanged);
+
+#ifdef ACHERON_HAVE_MINIAUDIO
+    addPage(tr("Audio"), new AudioPage(this));
+#endif
 
     categoryList->setCurrentRow(0);
 

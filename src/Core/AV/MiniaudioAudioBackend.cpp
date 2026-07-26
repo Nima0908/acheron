@@ -1,22 +1,9 @@
-#ifdef _MSC_VER
-#  pragma warning(push, 0)
-#endif
-
-#define MA_NO_DECODING
-#define MA_NO_ENCODING
-#define MA_NO_GENERATION
-#define MA_NO_RESOURCE_MANAGER
-#define MA_NO_NODE_GRAPH
-#define MA_NO_ENGINE
 #define MINIAUDIO_IMPLEMENTATION
-#include "miniaudio.h"
-
-#ifdef _MSC_VER
-#  pragma warning(pop)
-#endif
+#include "Core/AV/Miniaudio.hpp"
 
 #include "MiniaudioAudioBackend.hpp"
 
+#include "Core/AV/AudioBackends.hpp"
 #include "Core/Logging.hpp"
 
 #include <algorithm>
@@ -130,7 +117,7 @@ MiniaudioAudioBackend::MiniaudioAudioBackend(QObject *parent)
     if (ma->logInit)
         contextConfig.pLog = &ma->log;
 
-    if (ma_context_init(NULL, 0, &contextConfig, &ma->context) != MA_SUCCESS)
+    if (!initAudioContext(&ma->context, &contextConfig))
         qCWarning(LogVoice) << "Failed to initialize miniaudio context";
     else
         ma->contextInit = true;
