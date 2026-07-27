@@ -200,6 +200,7 @@ bool MiniaudioAudioBackend::startCapture()
     config.dataCallback = OnCapture;
     config.pUserData = this;
     config.periodSizeInFrames = AUDIO_FRAME_SAMPLES;
+    config.wasapi.noAutoConvertSRC = MA_TRUE;
 
     ma_device_id deviceId;
     if (!selectedInputId.isEmpty() && DeserializeDeviceId(selectedInputId, deviceId))
@@ -254,6 +255,7 @@ bool MiniaudioAudioBackend::startPlayback()
     config.dataCallback = OnPlayback;
     config.pUserData = this;
     config.periodSizeInFrames = AUDIO_FRAME_SAMPLES;
+    config.wasapi.noAutoConvertSRC = MA_TRUE;
 
     ma_device_id deviceId;
     if (!selectedOutputId.isEmpty() && DeserializeDeviceId(selectedOutputId, deviceId))
