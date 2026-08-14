@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
 option(USE_VCPKG "Use bundled vcpkg toolchain" ON)
-option(USE_SYSTEM_LIBDAVE "Use the system-installed libdave library instead of the vendored source" ON)
 
 # Must happen before project()
 if(USE_VCPKG AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -79,7 +78,6 @@ qt_standard_project_setup(I18N_TRANSLATED_LANGUAGES en)
 # directory so that #include <QtZlib/zlib.h> resolves using system zlib.
 if(NOT TARGET Qt::ZlibPrivate)
     find_package(ZLIB REQUIRED)
-
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/qtzlib-compat/QtZlib")
 
     file(WRITE
@@ -157,8 +155,7 @@ if(ENABLE_VOICE)
 
         set(MLSPP_DIR
             "${CMAKE_CURRENT_BINARY_DIR}/mlspp-shim"
-            CACHE PATH "" FORCE
-        )
+            CACHE PATH "" FORCE)
     else()
         message(STATUS "Found system mlspp")
     endif()
@@ -167,42 +164,44 @@ if(ENABLE_VOICE)
     set(CMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY ON)
 
     # libdave (Discord Audio/Video E2E Encryption)
-    # libdave doesnt provide a .cmake or .pc file.
-    # Therefore, use find_path()/find_library() and create
-    # the libdave target expected by the rest of this project.
-    if(USE_SYSTEM_LIBDAVE)
-        find_path(LIBDAVE_INCLUDE_DIR
-            NAMES dave/dave.h
-            REQUIRED
-        )
+    #
+    # Prefer the system-installed libdave. libdave does not provide
+    # pkg-config or CMake package metadata, so locate its headers and library
+    # directly.
+    #
+    # If the system library is not available, fall back to the vendored source.
+    find_path(LIBDAVE_INCLUDE_DIR
+        NAMES dave/dave.h
+    )
 
-        find_library(LIBDAVE_LIBRARY
-            NAMES dave libdave
-            REQUIRED
-        )
+    find_library(LIBDAVE_LIBRARY
+        NAMES dave libdave
+    )
 
-        message(STATUS "Using system libdave")
+    if(LIBDAVE_INCLUDE_DIR AND LIBDAVE_LIBRARY)
+        message(STATUS "Using system-installed libdave")
         message(STATUS "  libdave library: ${LIBDAVE_LIBRARY}")
         message(STATUS "  libdave headers: ${LIBDAVE_INCLUDE_DIR}")
 
         if(NOT TARGET libdave)
             add_library(libdave UNKNOWN IMPORTED)
+
             set_target_properties(libdave PROPERTIES
                 IMPORTED_LOCATION "${LIBDAVE_LIBRARY}"
                 INTERFACE_INCLUDE_DIRECTORIES "${LIBDAVE_INCLUDE_DIR}"
             )
         endif()
     else()
-        message(STATUS "Using vendored libdave")
+        message(STATUS "System libdave not found, using vendored submodule")
+
+        set(TESTING OFF CACHE BOOL "" FORCE)
+        set(PERSISTENT_KEYS OFF CACHE BOOL "" FORCE)
 
         # Prevent libdave's own vcpkg manifest from being processed; our
         # project-level vcpkg.json already provides all required packages.
-        set(TESTING OFF CACHE BOOL "" FORCE)
-        set(PERSISTENT_KEYS OFF CACHE BOOL "" FORCE)
         set(VCPKG_MANIFEST_DIR
             "${CMAKE_CURRENT_SOURCE_DIR}"
-            CACHE PATH "" FORCE
-        )
+            CACHE PATH "" FORCE)
 
         add_subdirectory(vendor/libdave/cpp EXCLUDE_FROM_ALL)
     endif()
@@ -317,7 +316,7 @@ if(ENABLE_VOICE)
         src/Core/AV/MiniaudioAudioBackend.cpp
         src/Core/AV/AudioBackends.cpp
         src/Core/AV/OpusEncoder.cpp
-        src/Discord/AV/OpusDecoder.cpp
+        src/Core/AV/OpusDecoder.cpp
         src/Core/AV/JitterBuffer.cpp
         src/Core/AV/AudioMixer.cpp
         src/Core/AV/NoiseSuppressor.cpp
@@ -325,32 +324,40 @@ if(ENABLE_VOICE)
     )
 endif()
 
-find_package(unofficial-nayuki-qr-code-generator CONFIG QUIET)
+if(USE_VCPKG)
+    find_package(unofficial-nayuki-qr-code-generator CONFIG REQUIRED)
 
-if(TARGET unofficial::nayuki-qr-code-generator::nayuki-qr-code-generator)
-    message(STATUS "Using installed nayuki-qr-code-generator")
+    set(QRCODEGEN_TARGET
+        unofficial::nayuki-qr-code-generator::nayuki-qr-code-generator
+    )
+
+    message(STATUS "Using vcpkg nayuki-qr-code-generator")
 else()
-    message(STATUS "nayuki-qr-code-generator not found, using vendored version")
-    list(APPEND PROJECT_SOURCES vendor/qrcodegen/cpp/qrcodegen.cpp)
+    find_package(qrcodegencpp CONFIG QUIET)
+
+    if(TARGET qrcodegencpp::qrcodegencpp)
+        message(STATUS "Using system-installed qrcodegencpp")
+        set(QRCODEGEN_TARGET qrcodegencpp::qrcodegencpp)
+    else()
+        message(STATUS "System qrcodegencpp not found, using vendored version")
+        list(APPEND PROJECT_SOURCES vendor/qrcodegen/cpp/qrcodegen.cpp)
+    endif()
 endif()
 
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
 
-target_include_directories(
-    ${PROJECT_NAME}
+target_include_directories(${PROJECT_NAME}
     PRIVATE
         vendor/emoji-segmenter
 )
 
-if(TARGET unofficial::nayuki-qr-code-generator::nayuki-qr-code-generator)
-    target_link_libraries(
-        ${PROJECT_NAME}
+if(QRCODEGEN_TARGET)
+    target_link_libraries(${PROJECT_NAME}
         PRIVATE
-            unofficial::nayuki-qr-code-generator::nayuki-qr-code-generator
+            ${QRCODEGEN_TARGET}
     )
 else()
-    target_include_directories(
-        ${PROJECT_NAME}
+    target_include_directories(${PROJECT_NAME}
         PRIVATE
             vendor/qrcodegen/cpp
     )
@@ -364,79 +371,66 @@ if(BUILD_TESTS)
         src/Core/EmojiSegmenter.cpp
     )
 
-    target_link_libraries(
-        TestMarkdown
+    target_link_libraries(TestMarkdown
         PRIVATE
             Qt::Core
             Qt::Test
     )
 
-    target_include_directories(
-        TestMarkdown
+    target_include_directories(TestMarkdown
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
             ${CMAKE_CURRENT_SOURCE_DIR}/vendor/emoji-segmenter
     )
 
-    add_test(
-        NAME MarkdownTests
-        COMMAND TestMarkdown
-    )
+    add_test(NAME MarkdownTests COMMAND TestMarkdown)
 endif()
 
 qt_add_translations(${PROJECT_NAME})
 
 if(MSVC)
-    target_link_options(
-        ${PROJECT_NAME}
+    target_link_options(${PROJECT_NAME}
         PRIVATE
             $<$<CONFIG:Debug>:/INCREMENTAL>
     )
 
-    target_compile_options(
-        ${PROJECT_NAME}
+    target_compile_options(${PROJECT_NAME}
         PRIVATE
             $<$<CONFIG:Debug>:/ZI>
             $<$<NOT:$<CONFIG:Debug>>:/Zi>
     )
 
-    target_compile_options(
-        ${PROJECT_NAME}
+    target_compile_options(${PROJECT_NAME}
         PRIVATE
             /utf-8
     )
 
     if(QT_VERSION_MAJOR LESS 6)
-        target_compile_options(
-            ${PROJECT_NAME}
+        target_compile_options(${PROJECT_NAME}
             PRIVATE
                 "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/qt5_compat.h"
         )
     endif()
 
     if(BUILD_TESTS)
-        target_link_options(
-            TestMarkdown
+        target_link_options(TestMarkdown
             PRIVATE
                 $<$<CONFIG:Debug>:/INCREMENTAL>
         )
 
-        target_compile_options(
-            TestMarkdown
+        target_compile_options(TestMarkdown
             PRIVATE
                 $<$<CONFIG:Debug>:/ZI>
                 $<$<NOT:$<CONFIG:Debug>>:/Zi>
         )
 
-        target_compile_options(
-            TestMarkdown
+        target_compile_options(TestMarkdown
             PRIVATE
                 /utf-8
         )
 
         if(QT_VERSION_MAJOR LESS 6)
-            target_compile_options(
-                TestMarkdown
+            target_compile_options(TestMarkdown
                 PRIVATE
                     "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/qt5_compat.h"
             )
@@ -444,34 +438,29 @@ if(MSVC)
     endif()
 endif()
 
-target_include_directories(
-    ${PROJECT_NAME}
+target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-set_target_properties(
-    ${PROJECT_NAME}
+set_target_properties(${PROJECT_NAME}
     PROPERTIES
         WIN32_EXECUTABLE TRUE
 )
 
-target_compile_definitions(
-    ${PROJECT_NAME}
+target_compile_definitions(${PROJECT_NAME}
     PRIVATE
         NOMINMAX
 )
 
 if(NOT ENABLE_VOICE)
-    target_compile_definitions(
-        ${PROJECT_NAME}
+    target_compile_definitions(${PROJECT_NAME}
         PRIVATE
             ACHERON_NO_VOICE
     )
 endif()
 
-target_link_libraries(
-    ${PROJECT_NAME}
+target_link_libraries(${PROJECT_NAME}
     PUBLIC
         Qt::Core
         Qt::Gui
@@ -487,35 +476,30 @@ target_link_libraries(
 )
 
 if(ENABLE_VOICE)
-    target_link_libraries(
-        ${PROJECT_NAME}
+    target_link_libraries(${PROJECT_NAME}
         PRIVATE
             ${SODIUM_TARGET}
             ${OPUS_TARGET}
             libdave
     )
 
-    target_include_directories(
-        ${PROJECT_NAME}
+    target_include_directories(${PROJECT_NAME}
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/vendor/miniaudio"
     )
 
-    target_compile_definitions(
-        ${PROJECT_NAME}
+    target_compile_definitions(${PROJECT_NAME}
         PRIVATE
             ACHERON_HAVE_MINIAUDIO
     )
 
     if(ENABLE_RNNOISE)
-        target_link_libraries(
-            ${PROJECT_NAME}
+        target_link_libraries(${PROJECT_NAME}
             PRIVATE
                 rnnoise
         )
 
-        target_compile_definitions(
-            ${PROJECT_NAME}
+        target_compile_definitions(${PROJECT_NAME}
             PRIVATE
                 ACHERON_HAVE_RNNOISE
         )
@@ -523,21 +507,18 @@ if(ENABLE_VOICE)
 endif()
 
 if(TARGET Qt::ZlibPrivate)
-    target_link_libraries(
-        ${PROJECT_NAME}
+    target_link_libraries(${PROJECT_NAME}
         PRIVATE
             Qt::ZlibPrivate
     )
 else()
-    target_link_libraries(
-        ${PROJECT_NAME}
+    target_link_libraries(${PROJECT_NAME}
         PRIVATE
             QtZlibCompat
     )
 endif()
 
-target_precompile_headers(
-    ${PROJECT_NAME}
+target_precompile_headers(${PROJECT_NAME}
     PUBLIC
         src/pch.h
 )
@@ -554,15 +535,9 @@ if(_curl_incs)
     set(CMAKE_REQUIRED_INCLUDES ${_curl_incs})
 endif()
 
-set(
-    _curl_saved_target_type
-    "${CMAKE_TRY_COMPILE_TARGET_TYPE}"
-)
+set(_curl_saved_target_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
 
-set(
-    CMAKE_TRY_COMPILE_TARGET_TYPE
-    STATIC_LIBRARY
-)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 check_cxx_symbol_exists(
     curl_easy_impersonate
@@ -570,16 +545,12 @@ check_cxx_symbol_exists(
     HAS_CURL_IMPERSONATE
 )
 
-set(
-    CMAKE_TRY_COMPILE_TARGET_TYPE
-    "${_curl_saved_target_type}"
-)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_curl_saved_target_type}")
 
 unset(CMAKE_REQUIRED_INCLUDES)
 
 if(HAS_CURL_IMPERSONATE)
-    target_compile_definitions(
-        ${PROJECT_NAME}
+    target_compile_definitions(${PROJECT_NAME}
         PRIVATE
             IS_CURL_IMPERSONATE
     )
@@ -597,9 +568,7 @@ else()
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/certs/cacert.pem")
-    add_custom_command(
-        TARGET ${PROJECT_NAME}
-        POST_BUILD
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/certs"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -610,9 +579,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/certs/cacert.pem")
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/TwemojiCOLRv0.ttf")
-    add_custom_command(
-        TARGET ${PROJECT_NAME}
-        POST_BUILD
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/fonts"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -624,14 +591,12 @@ endif()
 
 include(GNUInstallDirs)
 
-install(
-    TARGETS ${PROJECT_NAME}
+install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 if(UNIX AND NOT APPLE)
-    install(
-        FILES resources/desktop/io.github.ouwou.acheron.desktop
+    install(FILES resources/desktop/io.github.ouwou.acheron.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
     )
 endif()
